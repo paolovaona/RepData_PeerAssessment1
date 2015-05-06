@@ -4,22 +4,177 @@ output:
   html_document:
     keep_md: true
 ---
-
+##Introduction
+The objective of this document is to explain and answer to the assignment questions of the Peer
+assignment of [Reproducible Research](https://www.coursera.org/course/repdata) course.
+Before loading the data, a series of library and system defaults are set up.
+```{r defaults, results='hide',message=FALSE}
+Sys.setlocale("LC_TIME", "English") ##set Days name in english
+library(lubridate)
+library(xtable)
+library(dplyr)
+library(ggplot2)
+library(scales)
+```
 
 ## Loading and preprocessing the data
 
+The data set for the analysis is named [Activity monitoring data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip) [52k]. The data are collected from wereables devices such as Fitbit or Nike Fuelband.   
 
+The variables included in this dataset are:
+
+* steps: Number of steps taking in a 5-minute interval (missing values are coded as NA)
+
+* date: The date on which the measurement was taken in YYYY-MM-DD format
+
+* interval: Identifier for the 5-minute interval in which measurement was taken
+
+The dataset is stored in a comma-separated-value (CSV) file and there are a total of 17,568 observations in this dataset.
+
+```{r Loading}
+dataUrl<-"https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+if (!file.exists("activity.zip")) {
+        download.file(url = dataUrl, destfile ="activity.zip", mode='wb', cacheOK=FALSE)
+}
+raw_data<-read.csv(file = unzip(zipfile="activity.zip"))
+raw_data$date <- as.Date(raw_data$date, "%Y-%m-%d")
+
+```
+The data set obtained is then the following:
+```{r echo=FALSE}
+head(raw_data)
+```
 
 ## What is mean total number of steps taken per day?
+For this part of assignent it is possible to ignore the missing values. As first step we calculate for each day the total number of steps, that can be seen in the table below
+```{r results='asis',fig.align='center'}
+Total_Step1 <-aggregate(steps ~ date, data = raw_data, sum, na.rm = TRUE)
+Total_Step1$date<-format(Total_Step1$date,"%a %b %d")
 
+a<-xtable(Total_Step1,align = c("c","c","c"),label = 1)
+print(a,type="html",include.rownames=FALSE)
+```
+  
+     
+The histogram plot of the total steps per day is shown below:
+```{r Histogram,fig.align='center'}
+hist(Total_Step1$steps,xlab = "Steps",col = "blue",main ="Total steps per day-NA excluded" )
+```
+
+```{r MeanMedian, echo=FALSE,results='hide'}
+mean1<-format(round(mean(Total_Step1$steps), 0), nsmall = 0) 
+median1 <- median(Total_Step1$steps)
+```
+
+The mean of the total mean is equal to **`r mean1`** , while the median is equal to **`r median1`**.  
 
 
 ## What is the average daily activity pattern?
+In order to represent the average daily activity it is computed the mean steps taken on each 5 minute interval. In the plot below can be seen the activity.
 
+```{r Average,fig.align='center'}
+raw_data$interval <- as.POSIXct(strptime(sprintf("%04d", raw_data$interval), "%H%M"))
+step_int<-aggregate(steps ~ interval, data = raw_data,FUN = mean, na.rm = TRUE)
+plot(step_int$interval,step_int$steps,type="n",
+     xlim = c(min(step_int$interval),max(step_int$interval)),
+     ylab = "Average number of steps",
+     xlab="5-minute interval")
+lines(step_int$interval,step_int$steps, col = "black" )
+maxim<-step_int[which.max(step_int$steps),]
+```
+ 
+The maximum of the average steps is equal to **`r format(round(maxim[1,2], 2)) `** and it happen around   **`r format(maxim[1,1],"%H:%M") `** in the morning.
 
 
 ## Imputing missing values
 
+In al the analysis performed till now missing values where removed. Since this can add some bias to the analysis, first of all an estimation of the missing values is performed.
+```{r Missing}
+table(is.na(raw_data))
+```
 
+The total number of missing values is equal to **`r table(is.na(raw_data))[2]`**.  
+This value is about  **`r paste(round(100*(as.integer(table(is.na(raw_data))[2])/(as.integer(table(is.na(raw_data))[1])+as.integer(table(is.na(raw_data))[2]))),2),"%", sep="")`** of the total number of observation. It should then not have a great impact on the data.       
+In any case it is important to understand the distribution of the missing values, in order to define a strategy to replace fill them. The distribuition of the missing values is shown in the table below: 
+```{r}
+table(raw_data$date,is.na(raw_data$steps))
+```
+Since there are **`r length(unique(raw_data$date))-length(unique(Total_Step1$date))`** missing days where data were not registered the proposed strategy is to sobstitute to the missing values of those days with a 0 for each interval.
+To do this the following procedure is used:
+```{r}
+proc_data <-raw_data %>%
+            mutate(flag= is.na(steps)) %>%
+            mutate(new_steps=ifelse(flag==FALSE,steps,0)) %>%
+            select(date,interval,new_steps)
+```
+
+The new data set obtained have the same dimension as the initial one but the missing vales are equal to 0. Appling again the test performed at the beginnign we get:
+
+```{r}
+table(is.na(proc_data))
+```
+
+The new values and plot for the data set are then:
+```{r,fig.align='center'}
+Total_Step2 <-aggregate(new_steps ~ date, data = proc_data, sum)
+hist(Total_Step2$new_steps,xlab = "Steps",col = "green",main ="Total steps per day-NA included")
+```
+```{r,results='hide'}
+mean2<-format(round(mean(Total_Step2$new_steps), 0), nsmall = 0) 
+median2 <- median(Total_Step2$new_steps)
+```
+The mean of the total mean is equal to **`r mean2`** , while the median is equal to **`r format(round(median2,2),nsmall=0) `**. 
+
+The difference between the two approach can be seen in the figure and table below:
+
+```{r,fig.align='center'}
+g<-data.frame(steps=c(Total_Step1$steps,Total_Step2$new_steps),
+              Type=c(rep("No NA",length(Total_Step1$steps)),
+                rep("Filled NA",length(Total_Step2$new_steps))))
+r<-ggplot(g, aes(x=steps, fill=Type)) 
+r + geom_histogram(position="dodge", binwidth=5000,alpha=.5)
+```
+
+
+```{r}
+m<-data.frame(Case=c("No NA","Filled NA","Difference"),
+              Mean=c(mean1,mean2,round(mean(Total_Step1$steps)-mean(Total_Step2$new_steps),2)),
+              Median=c(median1,median2,median1-median2))
+m
+```
+As expected introducing a series of null values change both mean and median.   
+As can be seen, adding a series of null values let the total steps per day lower both mean and median.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+In order to answer to this question is necessary first to categorize the dates in weekdays and weekend. In order to do this the following script is used, starting from the filled data:
+```{r}
+by_days<-proc_data %>%
+         mutate(day_name=weekdays(date)) %>%
+         mutate(week=factor(ifelse(is.na(match(day_name,c("Saturday","Sunday")))==FALSE,
+                            "Weekend","Weekday"))) %>%
+         select(date,interval,new_steps,week,day_name)%>%
+         group_by(interval,week)
+
+head(by_days)
+table(by_days$week)
+```
+
+
+```{r,fig.align='center'}
+by_days<-summarize(by_days,avg=mean(new_steps))
+ggplot(by_days, aes(x=interval, y=avg)) + 
+        geom_line(color="blue") + 
+        facet_wrap(~ week, nrow=2, ncol=1) +
+        labs(x="Interval", y="Number of steps") +
+        ggtitle("Average of 5 min intervals for Weekday and Weekend")+
+        theme_bw()+
+        theme(axis.text.x=element_text(angle=270,hjust=1,vjust=0.5, size = 10)) + 
+        scale_x_datetime(breaks = date_breaks("90 mins"),
+                         labels = date_format("%H:%M"),
+                         limits = c(min(by_days$interval),max(by_days$interval)))
+
+```
+
+
+In the plot below it is possible to se how the time series plot of the 5-minute interval vary between weekend and weekdays. It is possible to see how, during week days, the activity starts before the weekend days, which is reasonable.
